@@ -19,8 +19,8 @@ func TestDrivechainMessageTypes(t *testing.T) {
 		{"Sidechain Acknowledgment", MSG_SIDECHAIN_ACK, 2},
 		{"Bundle Proposal", MSG_BUNDLE_PROPOSAL, 3},
 		{"Bundle Acknowledgment", MSG_BUNDLE_ACK, 4},
-		{"Deposit Transaction", MSG_DEPOSIT, 5},
-		{"Withdrawal Transaction", MSG_WITHDRAWAL, 6},
+		{"BMM Accept", MSG_BMM_ACCEPT, 7},
+		{"BMM Request", MSG_BMM_REQUEST, 8},
 	}
 
 	for _, tt := range tests {
@@ -43,10 +43,11 @@ func TestIsValidMessageType(t *testing.T) {
 		{"Valid: Sidechain Acknowledgment", MSG_SIDECHAIN_ACK, true},
 		{"Valid: Bundle Proposal", MSG_BUNDLE_PROPOSAL, true},
 		{"Valid: Bundle Acknowledgment", MSG_BUNDLE_ACK, true},
-		{"Valid: Deposit Transaction", MSG_DEPOSIT, true},
-		{"Valid: Withdrawal Transaction", MSG_WITHDRAWAL, true},
+		{"Valid: BMM Accept", MSG_BMM_ACCEPT, true},
+		{"Valid: BMM Request", MSG_BMM_REQUEST, true},
 		{"Invalid: Zero", 0, false},
-		{"Invalid: Too high", 7, false},
+		{"Invalid: Between valid range", 5, false},
+		{"Invalid: Too high", 9, false},
 		{"Invalid: Very high", 255, false},
 	}
 
@@ -71,8 +72,8 @@ func TestGetMessageTypeName(t *testing.T) {
 		{"Sidechain Acknowledgment", MSG_SIDECHAIN_ACK, "Sidechain Acknowledgment (M2)"},
 		{"Bundle Proposal", MSG_BUNDLE_PROPOSAL, "Bundle Proposal (M3)"},
 		{"Bundle Acknowledgment", MSG_BUNDLE_ACK, "Bundle Acknowledgment (M4)"},
-		{"Deposit Transaction", MSG_DEPOSIT, "Deposit Transaction (M5)"},
-		{"Withdrawal Transaction", MSG_WITHDRAWAL, "Withdrawal Transaction (M6)"},
+		{"BMM Accept", MSG_BMM_ACCEPT, "BMM Accept (M7)"},
+		{"BMM Request", MSG_BMM_REQUEST, "BMM Request (M8)"},
 		{"Unknown Type", 99, "Unknown Message Type"},
 	}
 
@@ -86,79 +87,65 @@ func TestGetMessageTypeName(t *testing.T) {
 	}
 }
 
-// TestParseDrivechainMessage tests the basic message parsing functionality
+// TestParseDrivechainMessage tests the OP_RETURN message parsing functionality
 func TestParseDrivechainMessage(t *testing.T) {
+	// Create valid M1 message script
+	m1 := &M1ProposeSidechain{
+		SidechainNumber: SidechainNumber(1),
+		Description:     SidechainDescription("test"),
+	}
+	m1Data, _ := m1.Serialize()
+	m1Script, _ := NullDataScript(m1Data)
+
+	// Create valid M2 message script
+	m2 := &M2AckSidechain{
+		SidechainNumber: SidechainNumber(1),
+		DescriptionHash: [32]byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20},
+	}
+	m2Data, _ := m2.Serialize()
+	m2Script, _ := NullDataScript(m2Data)
+
 	tests := []struct {
 		name        string
 		script      []byte
 		expectError bool
-		expectedMsg *DrivechainMessage
+		expectedType uint8
 	}{
 		{
-			name:        "Valid Sidechain Proposal",
-			script:      []byte{0xE0, MSG_SIDECHAIN_PROPOSAL}, // OP_DRIVECHAIN + M1
+			name:        "Valid M1 Sidechain Proposal",
+			script:      m1Script,
 			expectError: false,
-			expectedMsg: &DrivechainMessage{MessageType: MSG_SIDECHAIN_PROPOSAL},
+			expectedType: MSG_SIDECHAIN_PROPOSAL,
 		},
 		{
-			name:        "Valid Sidechain Acknowledgment",
-			script:      []byte{0xE0, MSG_SIDECHAIN_ACK}, // OP_DRIVECHAIN + M2
+			name:        "Valid M2 Sidechain Acknowledgment",
+			script:      m2Script,
 			expectError: false,
-			expectedMsg: &DrivechainMessage{MessageType: MSG_SIDECHAIN_ACK},
-		},
-		{
-			name:        "Valid Bundle Proposal",
-			script:      []byte{0xE0, MSG_BUNDLE_PROPOSAL}, // OP_DRIVECHAIN + M3
-			expectError: false,
-			expectedMsg: &DrivechainMessage{MessageType: MSG_BUNDLE_PROPOSAL},
-		},
-		{
-			name:        "Valid Bundle Acknowledgment",
-			script:      []byte{0xE0, MSG_BUNDLE_ACK}, // OP_DRIVECHAIN + M4
-			expectError: false,
-			expectedMsg: &DrivechainMessage{MessageType: MSG_BUNDLE_ACK},
-		},
-		{
-			name:        "Valid Deposit Transaction",
-			script:      []byte{0xE0, MSG_DEPOSIT}, // OP_DRIVECHAIN + M5
-			expectError: false,
-			expectedMsg: &DrivechainMessage{MessageType: MSG_DEPOSIT},
-		},
-		{
-			name:        "Valid Withdrawal Transaction",
-			script:      []byte{0xE0, MSG_WITHDRAWAL}, // OP_DRIVECHAIN + M6
-			expectError: false,
-			expectedMsg: &DrivechainMessage{MessageType: MSG_WITHDRAWAL},
+			expectedType: MSG_SIDECHAIN_ACK,
 		},
 		{
 			name:        "Script too short",
-			script:      []byte{0xE0},
+			script:      []byte{OP_RETURN},
 			expectError: true,
-			expectedMsg: nil,
+			expectedType: 0,
 		},
 		{
 			name:        "Empty script",
 			script:      []byte{},
 			expectError: true,
-			expectedMsg: nil,
+			expectedType: 0,
 		},
 		{
-			name:        "Wrong opcode",
-			script:      []byte{0x01, MSG_SIDECHAIN_PROPOSAL},
+			name:        "Not OP_RETURN",
+			script:      []byte{0x01, 0x02, 0x03},
 			expectError: true,
-			expectedMsg: nil,
+			expectedType: 0,
 		},
 		{
-			name:        "Invalid message type",
-			script:      []byte{0xE0, 99},
+			name:        "Invalid message tag",
+			script:      []byte{OP_RETURN, 0x04, 0x00, 0x00, 0x00, 0x00},
 			expectError: true,
-			expectedMsg: nil,
-		},
-		{
-			name:        "Message type too high",
-			script:      []byte{0xE0, 255},
-			expectError: true,
-			expectedMsg: nil,
+			expectedType: 0,
 		},
 	}
 
@@ -179,8 +166,8 @@ func TestParseDrivechainMessage(t *testing.T) {
 				}
 				if msg == nil {
 					t.Errorf("Expected message but got nil")
-				} else if msg.MessageType != tt.expectedMsg.MessageType {
-					t.Errorf("Expected message type %d, got %d", tt.expectedMsg.MessageType, msg.MessageType)
+				} else if msg.MessageType() != tt.expectedType {
+					t.Errorf("Expected message type %d, got %d", tt.expectedType, msg.MessageType())
 				}
 			}
 		})
@@ -200,7 +187,12 @@ func TestDrivechainMessageStructure(t *testing.T) {
 
 // Benchmark tests for performance
 func BenchmarkParseDrivechainMessage(b *testing.B) {
-	script := []byte{0xE0, MSG_SIDECHAIN_PROPOSAL}
+	m1 := &M1ProposeSidechain{
+		SidechainNumber: SidechainNumber(1),
+		Description:     SidechainDescription("test"),
+	}
+	m1Data, _ := m1.Serialize()
+	script, _ := NullDataScript(m1Data)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
